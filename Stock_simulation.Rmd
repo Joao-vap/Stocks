@@ -1,0 +1,295 @@
+---
+title: "Simulacao baseada em ECOR.SA"
+author: "JOAO VICTOR"
+date: "Agosto 01, 2020"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r include=FALSE}
+#library(tidyverse)
+#library(TTR)
+library(quantmod)
+#library(PerformanceAnalytics)
+library(RColorBrewer)
+#library(tseries)
+#library(lubridate)
+library(Quandl)
+#library(ggplot2)
+Quandl.api_key("Ns8L-9dpHErbn-S_V6ny")
+options("getSymbols.yahoo.warning"=FALSE)
+```
+
+# Importa-se os dados sobre a acao ECOR3.SA e cria- se as variaveis referentes a var diaria e valor de fechamento
+
+```{r}
+eco <- getSymbols("ECOR3.SA", auto.assign = F)
+eco_cl <- eco$ECOR3.SA.Close
+eco$ECOR3.SA.Change <-  eco$ECOR3.SA.High - eco$ECOR3.SA.Low 
+eco_ch <- eco$ECOR3.SA.Change
+```
+# Ambos variacoes entre dias e variacao diarias serao modeladas como normais
+
+```{r}
+summary(eco_ch$ECOR3.SA.Change)
+up.down <- eco_ch$ECOR3.SA.Change/2
+sd(up.down, na.rm = TRUE)
+
+daily_change_eco <- eco_cl/(stats::lag(eco_cl, 1)) - 1
+summary(daily_change_eco)
+sd(daily_change_eco, na.rm = TRUE)
+```
+# Modela-se agora o comportamento de ambas, diariamente e ao longo dos dias.
+
+```{r}
+valor.Open <- c(10)
+valor.Close <- c(NULL)
+variacao <- c(NULL)
+alta.i <- valor.Open[1] + abs(rnorm(1, mean = 0.384, sd = 0.102))
+baixa.i <- valor.Open[1] - abs(rnorm(1, mean = 0.384, sd = 0.102))
+valor.High <- c(alta.i)
+valor.Low <- c(baixa.i)
+
+for(i in 2:length(eco_cl)){
+  variacao[i] <- rnorm(1, mean = 0.000552, sd = 0.02479242)
+  valor.Open[i] = valor.Open[i-1] * (variacao[i] + 1)
+  valor.Close[i-1] = valor.Open[i]
+  valor.High[i] = valor.Open[i] + abs(rnorm(1, mean = 0.384, sd = 0.102))
+  valor.Low[i] = valor.Open[i] - abs(rnorm(1, mean = 0.384, sd = 0.102))
+}
+
+options(digits=3)
+
+valor.Close[length(valor.Close) + 1] <- valor.High[length(valor.High)]
+
+valor.Open <- reclass(valor.Open, eco_cl)
+valor.Low <- reclass(valor.Low, eco_cl)
+valor.Close <- reclass(valor.Close, eco_cl)
+valor.High <- reclass(valor.High, eco_cl)
+
+Acaosimulada <- merge(valor.Open, valor.High, valor.Low, valor.Close)
+
+chartSeries(Acaosimulada,
+            type = "line",
+            TA = c(addBBands(n = 20, sd = 2),addRSI()),
+            theme = chartTheme("white"))
+
+chartSeries(Acaosimulada,
+            subset = "2011-01-01::2011-05-01",
+            type = "candlesticks",
+            TA = c(addBBands(n = 20, sd = 2),addRSI()),
+            theme = chartTheme("black"))
+
+chartSeries(eco,
+            subset = "2011-01-01::2011-05-01",
+            type = "candlesticks",
+            TA = c(addBBands(n = 20, sd = 2),addRSI()),
+            theme = chartTheme("black"))
+
+chartSeries(Acaosimulada,
+            subset = "2017-01-01::2017-05-01",
+            type = "candlesticks",
+            TA = c(addBBands(n = 20, sd = 2),addRSI()),
+            theme = chartTheme("black"))
+
+chartSeries(eco,
+            subset = "2017-01-01::2017-05-01",
+            type = "candlesticks",
+            TA = c(addBBands(n = 20, sd = 2),addRSI()),
+            theme = chartTheme("black"))
+
+```
+
+# METODO 1: ACAO PELAS BANDAS
+
+
+As variaveis necessarias para os sinais de compra e venda estao aqui definidas
+
+```{r}
+SE <- BBands(Acaosimulada$valor.Close, n = 20, sd = 2)
+
+SE <- SE[-c(1:19),]
+
+Acaosimulada <- Acaosimulada[-c(1:19),]
+
+sinal1 <- c(NULL)
+sinal2 <- c(NULL)
+
+dim(SE)
+dim(Acaosimulada)
+```
+
+Cria-se aqui os sinais de compra e venda
+
+```{r}
+
+for(i in 2:length(Acaosimulada$valor.Close)) {
+  if(Acaosimulada[i,4] > SE$up[i]){
+    sinal2[i] <- 1
+    }else
+      sinal2[i] <- 0
+}
+
+for(i in 2:length(Acaosimulada$valor.Close)) {
+  if(Acaosimulada[i,4] < SE$dn[i]){
+    sinal1[i] <- 1
+    }else
+      sinal1[i] <- 0
+}
+
+chartSeries(Acaosimulada,
+            type = "line",
+            theme = chartTheme("white"))
+
+
+sinal2 <- reclass(sinal2, Acaosimulada)
+sinal1 <- reclass(sinal1, Acaosimulada)
+
+addTA(sinal2, type = "S", col = "red")
+addTA(sinal1, type = "S", col = "green")
+```
+
+# Modelando um investimento
+
+```{r}
+
+#Montagem da acao
+
+eco <- getSymbols("ECOR3.SA", auto.assign = F)
+eco_cl <- eco$ECOR3.SA.Close
+eco$ECOR3.SA.Change <-  eco$ECOR3.SA.High - eco$ECOR3.SA.Low 
+eco_ch <- eco$ECOR3.SA.Change
+
+TOTAL <- c()
+
+for(vezes in 1:500){
+
+valor.Open <- c(10)
+valor.Close <- c(NULL)
+variacao <- c(NULL)
+alta.i <- valor.Open[1] + abs(rnorm(1, mean = 0.384, sd = 0.102))
+baixa.i <- valor.Open[1] - abs(rnorm(1, mean = 0.384, sd = 0.102))
+valor.High <- c(alta.i)
+valor.Low <- c(baixa.i)
+
+for(i in 2:length(eco_cl)){
+  variacao[i] <- rnorm(1, mean = 0.000552, sd = 0.02479242)
+  valor.Open[i] = valor.Open[i-1] * (variacao[i] + 1)
+  valor.Close[i-1] = valor.Open[i]
+  valor.High[i] = valor.Open[i] + abs(rnorm(1, mean = 0.384, sd = 0.102))
+  valor.Low[i] = valor.Open[i] - abs(rnorm(1, mean = 0.384, sd = 0.102))
+}
+
+options(digits=3)
+
+valor.Close[length(valor.Close) + 1] <- valor.High[length(valor.High)]
+
+valor.Open <- reclass(valor.Open, eco_cl)
+valor.Low <- reclass(valor.Low, eco_cl)
+valor.Close <- reclass(valor.Close, eco_cl)
+valor.High <- reclass(valor.High, eco_cl)
+
+Acaosimulada <- merge(valor.Open, valor.High, valor.Low, valor.Close)
+
+# metodo 1
+
+SE <- BBands(Acaosimulada$valor.Close, n = 20, sd = 2)
+
+SE <- SE[-c(1:19),]
+
+Acaosimulada <- Acaosimulada[-c(1:19),]
+
+sinal1 <- c(NULL)
+sinal2 <- c(NULL)
+
+for(i in 2:length(Acaosimulada$valor.Close)) {
+  if(Acaosimulada[i,4] > SE$up[i]){
+    sinal2[i] <- 1
+    }else
+      sinal2[i] <- 0
+}
+
+for(i in 2:length(Acaosimulada$valor.Close)) {
+  if(Acaosimulada[i,4] < SE$dn[i]){
+    sinal1[i] <- 1
+    }else
+      sinal1[i] <- 0
+}
+
+sinal2 <- reclass(sinal2, Acaosimulada)
+sinal1 <- reclass(sinal1, Acaosimulada)
+
+#Agora o investimento
+
+options(scipen = 9999)
+
+Acaosimulada <- Acaosimulada[-c(1),]
+sinal2 <- sinal2[-c(1),]
+sinal1 <- sinal1[-c(1),]
+variacao <- variacao[-c(1)]
+  
+meudinheiro <- 5000
+investido <- 5000
+soma <- c()
+passos <- c()
+
+
+for(i in 1:(length(Acaosimulada$valor.Close))){
+  soma[i] <- investido + meudinheiro
+  investido <- investido + (as.numeric(variacao[i]) * investido)
+  passos[i] <- investido + meudinheiro
+  if(as.numeric(sinal1[i,1]) == 1){
+    meudinheiro <- meudinheiro - as.numeric(Acaosimulada$valor.Close[i])
+    investido <- investido + as.numeric(Acaosimulada$valor.Close[i])
+  } else if(investido >= as.numeric(Acaosimulada$valor.Close[i])) {
+    if(as.numeric(sinal2[i,1]) == 1) {
+      meudinheiro <- meudinheiro + as.numeric(Acaosimulada$valor.Close[i])
+      investido <- investido - as.numeric(Acaosimulada$valor.Close[i])
+    } else {
+      
+    }
+  } else{
+    
+  }
+}
+TOTAL[vezes] <- meudinheiro + investido
+
+if(vezes > 1){
+  if(TOTAL[vezes] > TOTAL[as.numeric(vezes)-1]){
+    variacaomax <- variacao
+    passosmax <- passos
+    somamax <- soma
+  }
+}
+}
+
+```
+
+```{r}
+preco <- c(10)
+for(i in 2:length(variacaomax)){
+  preco[i] <- preco[i-1] * (1 + variacaomax[i-1])
+}
+head(preco)
+tail(preco)
+```
+```{r}
+plot(preco, type = "line")
+```
+
+
+```{r}
+plot(TOTAL)
+hist(TOTAL, breaks = 500, xlim = c(0,50000))
+summary(TOTAL)
+```
+
+
